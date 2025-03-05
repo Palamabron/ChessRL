@@ -11,10 +11,10 @@ import chess
 import torch
 import numpy as np
 
-from chess_rl.config import Config
-from chess_rl.network import ChessNetwork
-from chess_rl.mcts import MCTS
-from chess_rl.encoding import encode_board, move_to_index
+from ChessRL.config import Config
+from ChessRL.network import ChessNetwork
+from ChessRL.mcts import MCTS
+from ChessRL.encoding import encode_board, move_to_index
 
 # Initialize pygame
 pygame.init()
@@ -62,6 +62,7 @@ class ChessGUI:
         
         # Load the AI model
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {self.device}")
         self.network = ChessNetwork(config)
         self.network.to(self.device)
         
@@ -77,6 +78,7 @@ class ChessGUI:
         else:
             print("No model specified. Playing with untrained model.")
         
+        # MCTS will automatically detect the device from the network
         self.mcts = MCTS(self.network, config)
     
     def load_pieces(self):

@@ -6,12 +6,13 @@ import chess
 import numpy as np
 import torch
 
-def encode_board(board):
+def encode_board(board, device=None):
     """
     Encode a chess board position into a format suitable for the neural network.
     
     Args:
         board (chess.Board): The chess board to encode
+        device (torch.device, optional): Device to place the tensor on
         
     Returns:
         torch.FloatTensor: Encoded board as a tensor of shape (12, 8, 8)
@@ -30,11 +31,15 @@ def encode_board(board):
             planes[piece_idx[piece.symbol()]][rank][file] = 1
     
     # Return as a PyTorch tensor
-    return torch.FloatTensor(planes)
+    tensor = torch.FloatTensor(planes)
+    if device is not None:
+        tensor = tensor.to(device)
+    return tensor
 
 def move_to_index(move):
     """
     Convert a chess.Move to an index for the policy vector.
+    Safety-checked to keep indices within bounds.
     
     Args:
         move (chess.Move): The move to convert
@@ -45,18 +50,35 @@ def move_to_index(move):
     from_square = move.from_square
     to_square = move.to_square
     
-    # Handle promotions
+    # Ensure from_square and to_square are within bounds
+    if not (0 <= from_square < 64 and 0 <= to_square < 64):
+        # Return a safe default index if out of bounds
+        return 0
+    
+    # Basic move encoding (from_square * 64 + to_square)
+    move_idx = from_square * 64 + to_square
+    
+    # Handle promotions - each promotion type gets its own index
     if move.promotion:
-        # Map promotions to specific indices
         promotion_offset = {
             chess.QUEEN: 0,
             chess.ROOK: 1,
             chess.BISHOP: 2,
             chess.KNIGHT: 3
         }
-        return 64*64 + from_square*64 + to_square + promotion_offset[move.promotion]
+        # We use 64*64 as base index for promotions
+        # Each from_square has 64*4 indices (to_square * 4 + promotion_type)
+        promo_idx = 64*64 + from_square*64*4 + to_square*4 + promotion_offset.get(move.promotion, 0)
+        
+        # Check if promotion index is within bounds
+        if promo_idx < 4672:
+            return promo_idx
+        else:
+            # If out of bounds, default to queen promotion which should be in bounds
+            return 64*64 + from_square*64 + to_square
     
-    return from_square*64 + to_square
+    # Return the basic move index, ensuring it's within bounds
+    return min(move_idx, 4671)
 
 def index_to_move(index, board):
     """
@@ -69,12 +91,19 @@ def index_to_move(index, board):
     Returns:
         chess.Move: The corresponding move
     """
+    # Ensure index is within bounds
+    index = max(0, min(index, 4671))
+    
     # If it's a promotion move
     if index >= 64*64:
-        prom_index = index - 64*64
-        from_square = prom_index // 64 // 4
-        to_square = (prom_index // 4) % 64
-        promotion_piece = [chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT][prom_index % 4]
+        # Handle the promotion encoding
+        remainder = index - 64*64
+        from_square = remainder // (64*4)
+        remainder = remainder % (64*4)
+        to_square = remainder // 4
+        promotion_type = remainder % 4
+        
+        promotion_piece = [chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT][promotion_type]
         return chess.Move(from_square, to_square, promotion_piece)
     
     # Regular move

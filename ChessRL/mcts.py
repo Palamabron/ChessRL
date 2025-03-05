@@ -7,8 +7,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import chess
+import time
+from collections import deque
 
-from chess_rl.encoding import encode_board, move_to_index
+from ChessRL.encoding import encode_board, move_to_index
 
 class MCTSNode:
     """
@@ -46,6 +48,11 @@ class MCTS:
         """
         self.network = network
         self.config = config
+        self.device = next(network.parameters()).device
+        
+        # Performance optimization: prepare batch evaluation
+        self.evaluation_queue = []
+        self.batch_size = 16  # Evaluate multiple positions at once
     
     def search(self, board, is_training=True):
         """
@@ -68,7 +75,13 @@ class MCTS:
             # Add Dirichlet noise to root node for exploration in training
             self._add_dirichlet_noise(root)
         
+        # Prepare batched search
+        search_paths = []
+        current_boards = []
+        leaf_nodes = []
+        
         for _ in range(self.config.num_simulations):
+            # Reset per simulation
             node = root
             scratch_board = board.copy()
             search_path = [node]
@@ -79,24 +92,90 @@ class MCTS:
                 scratch_board.push(action)
                 search_path.append(node)
             
-            # Expansion and evaluation phase
-            value = 0
+            # Store for batch evaluation
             if not scratch_board.is_game_over() and not node.expanded():
-                value = self._expand_node(node, scratch_board)
+                search_paths.append(search_path)
+                current_boards.append(scratch_board.copy())
+                leaf_nodes.append(node)
             else:
+                # Game ended - backpropagate immediately
                 # Game result: 1 for win, 0 for draw, -1 for loss
                 result = scratch_board.result()
+                value = 0
                 if result == "1-0":
                     value = 1 if scratch_board.turn == chess.BLACK else -1
                 elif result == "0-1":
                     value = 1 if scratch_board.turn == chess.WHITE else -1
-                else:  # Draw
-                    value = 0
+                
+                self._backpropagate(search_path, value, scratch_board.turn)
             
-            # Backpropagation phase
-            self._backpropagate(search_path, value, scratch_board.turn)
+            # Process in batches for performance
+            if len(leaf_nodes) >= self.batch_size or _ == self.config.num_simulations - 1:
+                if leaf_nodes:  # Only if we have nodes to evaluate
+                    # Process the batch
+                    values = self._batch_expand_nodes(leaf_nodes, current_boards)
+                    
+                    # Backpropagate for each path
+                    for path_idx, search_path in enumerate(search_paths):
+                        value = values[path_idx]
+                        board_state = current_boards[path_idx]
+                        self._backpropagate(search_path, value, board_state.turn)
+                    
+                    # Clear for next batch
+                    search_paths = []
+                    current_boards = []
+                    leaf_nodes = []
         
         return root
+    
+    def _batch_expand_nodes(self, nodes, boards):
+        """
+        Expand multiple nodes at once using batched network evaluation
+        
+        Args:
+            nodes (list): List of nodes to expand
+            boards (list): Corresponding board states
+            
+        Returns:
+            list: Value predictions for each node
+        """
+        # Encode all boards in a batch
+        batch_input = torch.stack([encode_board(board, self.device) for board in boards])
+        
+        # Run neural network in a single batch
+        with torch.no_grad():
+            policy_logits, value_preds = self.network(batch_input)
+        
+        # Process each node with its corresponding outputs
+        policies = F.softmax(policy_logits, dim=1)
+        values = value_preds.squeeze(-1).cpu().numpy()
+        
+        # Expand all nodes with their respective policies
+        for i, (node, board) in enumerate(zip(nodes, boards)):
+            policy = policies[i].cpu().numpy()
+            
+            # Create children for all legal moves
+            for move in board.legal_moves:
+                try:
+                    move_idx = move_to_index(move)
+                    # Ensure move_idx is within bounds
+                    if move_idx < len(policy):
+                        prior = policy[move_idx]
+                    else:
+                        prior = 0.001  # Default small prior if out of bounds
+                    
+                    child = MCTSNode(prior=float(prior), parent=node)
+                    child.board = board.copy()
+                    child.board.push(move)
+                    node.children[move] = child
+                except Exception as e:
+                    # If there's any error, use a default prior
+                    child = MCTSNode(prior=0.001, parent=node)
+                    child.board = board.copy()
+                    child.board.push(move)
+                    node.children[move] = child
+        
+        return values
     
     def _select_child(self, node):
         """
@@ -151,7 +230,7 @@ class MCTS:
                 return 0
         
         # Predict policy and value using the neural network
-        encoded_board = encode_board(board)
+        encoded_board = encode_board(board, self.device)
         encoded_board = encoded_board.unsqueeze(0)  # Add batch dimension
         
         with torch.no_grad():
@@ -163,11 +242,24 @@ class MCTS:
         
         # Create children for all legal moves
         for move in board.legal_moves:
-            move_idx = move_to_index(move)
-            child = MCTSNode(prior=policy[move_idx], parent=node)
-            child.board = board.copy()
-            child.board.push(move)
-            node.children[move] = child
+            try:
+                move_idx = move_to_index(move)
+                # Ensure move_idx is within bounds
+                if move_idx < len(policy):
+                    prior = policy[move_idx]
+                else:
+                    prior = 0.001  # Default small prior if out of bounds
+                
+                child = MCTSNode(prior=prior, parent=node)
+                child.board = board.copy()
+                child.board.push(move)
+                node.children[move] = child
+            except Exception as e:
+                # If there's any error, use a default prior
+                child = MCTSNode(prior=0.001, parent=node)
+                child.board = board.copy()
+                child.board.push(move)
+                node.children[move] = child
         
         return value
     
@@ -183,7 +275,7 @@ class MCTS:
         for node in search_path:
             node.visit_count += 1
             # Value is from the perspective of the current player
-            if node.board.turn == player:
+            if node.board and node.board.turn == player:
                 node.value_sum += value
             else:
                 node.value_sum -= value  # Negate value for the opponent

@@ -1,0 +1,45 @@
+FROM python:3.11-slim
+
+# Install system dependencies including X11 support for pygame
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    git \
+    libsdl2-2.0-0 \
+    libsdl2-image-2.0-0 \
+    libsdl2-mixer-2.0-0 \
+    libsdl2-ttf-2.0-0 \
+    libfreetype6-dev \
+    libportmidi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Install uv for faster package installation
+RUN curl -L https://github.com/astral-sh/uv/releases/download/0.1.21/uv-x86_64-unknown-linux-gnu.tar.gz | tar xz -C /tmp \
+    && mv /tmp/uv /usr/local/bin
+
+# Copy requirements
+COPY pyproject.toml /app/
+
+# Install dependencies using uv and add pygame
+RUN uv pip install --system -e . && \
+    uv pip install --system pygame==2.5.2
+
+# Copy the source code
+COPY . /app/
+
+# Create directory for models if it doesn't exist
+RUN mkdir -p models
+
+# Environment variables for X11 forwarding
+ENV DISPLAY=:0 \
+    PYTHONUNBUFFERED=1 \
+    SDL_AUDIODRIVER=dummy
+
+# Default command - play GUI
+ENTRYPOINT ["python", "play_gui.py"]
+
+# Default arguments - can be overridden
+CMD ["--model", "chess_model_final.pt"]
