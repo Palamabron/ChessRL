@@ -1,21 +1,18 @@
 #!/bin/bash
-# build_and_run.sh - Build and run script for Chess RL
+# build_and_run.sh - Build and run script for Chess RL with uv integration
+# Użycie:
+#   ./build_and_run.sh {build|train|play|dev|watch} [gpu|nogpu]
+# Jeśli druga flaga jest "gpu", to uruchomienie będzie z konfiguracją GPU.
+# W przeciwnym razie (lub gdy flaga jest "nogpu") zostanie usunięta konfiguracja GPU.
 
-# Create Dockerfiles from the artifact contents
-cp Dockerfile.train Dockerfile.train
-cp Dockerfile.gui Dockerfile.gui 
-cp docker-compose.yml docker-compose.yml
+# Ustawienie PATH, aby upewnić się, że katalogi systemowe są dostępne
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# Function to check if NVIDIA GPU is available
-check_gpu() {
-    if command -v nvidia-smi &> /dev/null; then
-        echo "NVIDIA GPU detected. Setting up GPU support."
-        return 0
-    else
-        echo "No NVIDIA GPU detected. Using CPU-only mode."
-        return 1
-    fi
-}
+# Ustawienie flagi GPU (domyślnie CPU-only)
+GPU_FLAG="nogpu"
+if [ "$2" == "gpu" ]; then
+    GPU_FLAG="gpu"
+fi
 
 # Build the Docker images
 build_images() {
@@ -26,19 +23,28 @@ build_images() {
 # Run the training container
 run_training() {
     echo "Starting training container..."
-    if check_gpu; then
+    if [ "$GPU_FLAG" == "gpu" ]; then
+        echo "Using GPU configuration."
         docker-compose up train
     else
+        echo "Using CPU-only configuration."
         # Remove GPU-specific configuration for CPU-only systems
-        sed -i 's/deploy:.*$//' docker-compose.yml
-        sed -i 's/resources:.*$//' docker-compose.yml
-        sed -i 's/reservations:.*$//' docker-compose.yml
-        sed -i 's/devices:.*$//' docker-compose.yml
-        sed -i 's/- driver: nvidia.*$//' docker-compose.yml
-        sed -i 's/count: 1.*$//' docker-compose.yml
-        sed -i 's/capabilities: \[gpu\].*$//' docker-compose.yml
-        sed -i 's/CUDA_VISIBLE_DEVICES=0//' docker-compose.yml
-        docker-compose up train
+        # Create a temporary docker-compose file without GPU configuration
+        cat docker-compose.yml | \
+            grep -v "deploy:" | \
+            grep -v "resources:" | \
+            grep -v "reservations:" | \
+            grep -v "devices:" | \
+            grep -v "driver: nvidia" | \
+            grep -v "count: 1" | \
+            grep -v "capabilities: \[gpu\]" | \
+            grep -v "CUDA_VISIBLE_DEVICES=0" | \
+            grep -v "gpus:" > docker-compose.cpu.yml
+
+        docker-compose -f docker-compose.cpu.yml up train
+
+        # Clean up the temporary file
+        rm docker-compose.cpu.yml
     fi
 }
 
@@ -48,6 +54,20 @@ run_gui() {
     # Set up X11 forwarding
     xhost +local:docker || true
     docker-compose up play
+}
+
+# Run development shell
+run_dev() {
+    echo "Starting development container..."
+    # Set up X11 forwarding
+    xhost +local:docker || true
+    docker-compose run dev
+}
+
+# Run docker-compose with watch mode for development
+run_watch() {
+    echo "Starting development container with file watching..."
+    docker-compose watch
 }
 
 # Main execution
@@ -61,11 +81,19 @@ case "$1" in
     "play")
         run_gui
         ;;
+    "dev")
+        run_dev
+        ;;
+    "watch")
+        run_watch
+        ;;
     *)
-        echo "Usage: $0 {build|train|play}"
+        echo "Usage: $0 {build|train|play|dev|watch} [gpu|nogpu]"
         echo "  build: Build the Docker images"
-        echo "  train: Run the training container"
+        echo "  train: Run the training container (use 'gpu' or 'nogpu' as second argument)"
         echo "  play: Run the GUI container"
+        echo "  dev: Run a development shell"
+        echo "  watch: Run with file watching for development"
         exit 1
         ;;
 esac

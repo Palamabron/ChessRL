@@ -16,6 +16,9 @@ dependencies = [
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
+[project.scripts]
+chessrl-train = "train:main"
+chessrl-play = "play_gui:main"
+
 [tool.setuptools]
-packages = ["config", "encoding", "mcts", "network", "replay_buffer", "self_play", "trainer"]
-py-modules = ["main"]
+packages = ["ChessRL"]

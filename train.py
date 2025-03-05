@@ -14,6 +14,12 @@ from ChessRL.network import ChessNetwork
 from ChessRL.trainer import Trainer
 from ChessRL.self_play import SelfPlay
 
+# Add after device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"PyTorch CUDA available: {torch.cuda.is_available()}")
+print(f"CUDA version: {torch.version.cuda if torch.cuda.is_available() else 'N/A'}")
+if torch.cuda.is_available():
+    print(f"GPU count: {torch.cuda.device_count()}")
+    print(f"GPU name: {torch.cuda.get_device_name(0)}")
 
 def set_seed(seed):
     """Set random seeds for reproducibility"""
