@@ -1,60 +1,104 @@
-# AlphaZero_Chess
-# From-scratch implementation of AlphaZero for Chess
+# AlphaZero Chess
 
-This repo demonstrates an implementation of AlphaZero framework for Chess, using python and PyTorch.
+Implementacja algorytmu AlphaZero dla szachów. Projekt wykorzystuje głębokie uczenie maszynowe i przeszukiwanie drzewa Monte Carlo (MCTS) do trenowania silnika szachowego, który uczy się grać w szachy bez wprowadzania specjalistycznej wiedzy ludzkiej.
 
-We all know that AlphaGo, created by DeepMind, created a big stir when it defeated reigning world champion Lee Sedol 4-1 in the game of Go in 2016, hence becoming the first computer program to achieve superhuman performance in an ultra-complicated game. 
+## Informacje o projekcie
 
-However, AlphaGoZero, published (https://www.nature.com/articles/nature24270) a year later in 2017, push boundaries one big step further by achieving a similar feat without any human data inputs. A subsequent paper (https://arxiv.org/abs/1712.01815) released by the same group DeepMind successfully applied the same reinforcement learning + supervised learning framework to chess, outperforming the previous best chess program Stockfish after just 4 hours of training.
+AlphaZero Chess to implementacja inspirowana algorytmem DeepMind AlphaZero, zastosowana specyficznie do gry w szachy. Projekt umożliwia:
 
-Inspired by the power of such supervised reinforcement learning models, I created a repository to build my own chess AI program from scratch, closely following the methods as described in the papers above.
+- Trening modelu od podstaw poprzez samouczenie się (self-play)
+- Granie przeciwko wytrenowanemu modelowi poprzez intuicyjny interfejs graficzny
+- Ewaluację modeli w celu porównania ich siły gry
+- Wizualizację i analizę rozegranych partii
 
-# Contents
-In this repository, you will find the following core scripts:
+## Struktura projektu
 
-1) MCTS_chess.py - implements the Monte-Carlo Tree Search (MCTS) algorithm based on Polynomial Upper Confidence Trees (PUCT) method for leaf transversal. This generates datasets (state, policy, value) for neural network training
+- `alpha_net.py` - Implementacja sieci neuronowej (policy i value networks)
+- `MCTS_chess.py` - Implementacja przeszukiwania drzewa Monte Carlo
+- `chess_board.py` - Reprezentacja szachownicy i zasad gry
+- `chess_gui.py` - Interfejs graficzny do gry z modelem
+- `encoder_decoder.py` - Kodowanie/dekodowanie stanów szachownicy do postaci wektorowej
+- `evaluator.py` - Narzędzie do ewaluacji siły modeli
+- `pipeline.py` - Główny pipeline treningowy łączący self-play i trening sieci
+- `cpu_pipeline.py` - Alternatywna wersja zoptymalizowana dla procesorów CPU
+- `run_alphazero.py` - Pomocniczy skrypt do uruchamiania różnych komponentów projektu
+- `init_model.py` - Inicjalizacja nowego modelu
+- `visualize_board.py` - Wizualizacja stanów szachownicy
+- `analyze_games.py` - Narzędzie do analizy rozegranych partii
 
-2) alpha_net.py - PyTorch implementation of the AlphaGoZero neural network architecture, with slightly reduced number of residual blocks (19) and convolution channels (256) for faster computation. The network consists of, in order:
-- A convolution block with batch normalization
-- 19 residual blocks with each block consisting of two convolutional layers with batch normalization
-- An output block with two heads: a policy output head that consists of convolutional layer with batch normalization followed by logsoftmax, and a value head that consists of a convolutional layer with relu and tanh activation.
+## Wymagania
 
-3) chess_board.py � Implementation of a chess board python class with all game rules and possible moves
+- Python 3.6+
+- PyTorch
+- NumPy
+- Matplotlib
+- Pygame (dla GUI)
 
-4) encoder_decoder.py � list of functions to encode/decode chess board class for input/interpretation into neural network, as well as encode/decode the action policy output from neural network
+Pełna lista zależności znajduje się w pliku `requirements.txt`.
 
-5) evaluator.py � arena class to pit current neural net against the neural net from previous iteration, and keeps the neural net that wins the most games
+## Instalacja
 
-6) train.py � function to start the neural network training process
+1. Sklonuj repozytorium:
+   ```
+   git clone https://github.com/username/AlphaZero_Chess.git
+   cd AlphaZero_Chess
+   ```
 
-7) train_multiprocessing.py � multiprocessing version of train.py
+2. Zainstaluj wymagane pakiety:
+   ```
+   pip install -r requirements.txt
+   ```
 
-8) pipeline.py � script to starts a sequential iteration pipeline consisting of MCTS search to generate data and neural network training. The evaluator arena function is temporarily excluded here during the early stages of training the neural network.
+3. Przygotuj środowisko:
+   ```
+   python run_alphazero.py setup
+   ```
 
-9) visualize_board.py � miscellaneous function to visualize the chessboard in a more attractive way
+## Użycie
 
-10) analyze_games.py � miscellaneous script to visualize and save the chess games
+### Trening modelu
 
-# Iteration pipeline
+```
+python run_alphazero.py train --iterations 5 --games 10 --workers 4
+```
 
-A full iteration pipeline consists of:
-1) Self-play using MCTS (MCTS_chess.py) to generate game datasets (game state, policy, value), with the neural net guiding the search by providing the prior probabilities in the PUCT algorithm
+Parametry:
+- `--iterations`: Liczba iteracji treningu
+- `--games`: Liczba gier na proces roboczy
+- `--workers`: Liczba równoległych procesów
+- `--mcts_sims`: Liczba symulacji MCTS na ruch (domyślnie 800)
+- `--epochs`: Liczba epok treningu na iterację (domyślnie 20)
 
-2) Train the neural network (train.py) using the (game state, policy, value) datasets generated from MCTS self-play
+### Gra przeciwko modelowi
 
-3) Evaluate (evaluator.py) the trained neural net (at predefined checkpoints) by pitting it against the neural net from the previous iteration, again using MCTS guided by the respective neural nets, and keep only the neural net that performs better.
+```
+python run_alphazero.py play --model current_net_trained_iter4.pth.tar --color white
+```
 
-4) Rinse and repeat. Note that in the paper, all these processes are running simultaneously in parallel, subject to available computing resources one has.
+Parametry:
+- `--model`: Ścieżka do modelu (opcjonalnie)
+- `--color`: Kolor, którym grasz ('white' lub 'black')
+- `--mcts_sims`: Liczba symulacji MCTS na ruch AI (domyślnie 800)
 
-# How to play
-1) Run pipeline.py to start the MCTS search and neural net training process. Change the folder and net saved names accordingly. Note that for the first time, you will need to create and save a random, initialized alpha_net for loading. Multiprocessing is enabled, which shares the PyTorch net model in a single CUDA GPU across 6 CPUs workers each running a MCTS self-play.
+### Ewaluacja modeli
 
-OR
+```
+python run_alphazero.py evaluate --model1 current_net_trained_iter3.pth.tar --model2 current_net_trained_iter4.pth.tar --games 100
+```
 
-1) Run the MCTS_chess.py to generate self-play datasets. Note that for the first time, you will need to create and save a random, initialized alpha_net for loading. Multiprocessing is enabled, which shares the PyTorch net model in a single CUDA GPU across 6 CPUs workers each running a MCTS self-play. 
+Parametry:
+- `--model1`: Pierwszy model do ewaluacji
+- `--model2`: Drugi model do ewaluacji
+- `--games`: Liczba gier do rozegrania
+- `--workers`: Liczba równoległych procesów
+- `--mcts_sims`: Liczba symulacji MCTS na ruch (domyślnie 800)
 
-2) Run train.py to train the alpha_net with the datasets.
+## Planowane ulepszenia
 
-3) At predetermined checkpoints, run evaluator.py to evaluate the trained net against the neural net from previous iteration. Saves the neural net that performs better. Multiprocessing is enabled, which shares the PyTorch net model in a single CUDA GPU across 6 CPUs workers each running a MCTS self-play. 
-
-4) Repeat for next iteration.
+Lista potencjalnych ulepszeń projektu znajduje się w pliku `ToDo.md`. Zawiera ona propozycje optymalizacji:
+- Architektury sieci neuronowej
+- Algorytmu Monte Carlo Tree Search
+- Procesu treningowego
+- Zarządzania danymi
+- Gier końcowych
+- Integracji z serwisem Lichess
